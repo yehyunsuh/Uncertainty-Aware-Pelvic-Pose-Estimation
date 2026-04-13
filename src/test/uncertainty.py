@@ -56,15 +56,90 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
 
     all_results = []
 
+    # Collect per-axis errors for computing RMSE across all valid images
+    per_axis_errors_all = {
+        'all': [],
+        'filtered': [],
+        'weighted_ver1': [],
+        'weighted_ver2': [],
+        'weighted_ver3': [],
+        'gt': []
+    }
+
     # epsilon thresholds for comparisons
     eps_pred = 0.1
     eps_rot = 0.1
     eps_trans = 0.1
 
+    def rmse_or_nan(values):
+        values = np.asarray(values, dtype=np.float32)
+        if not np.isfinite(values).any():
+            return np.nan
+        return float(np.sqrt(np.nanmean(values ** 2)))
+
+    def default_result_row(image_name):
+        return {
+            "image": image_name,
+            "uncertainty_weight_beta": float(args.uncertainty_weight_beta),
+            "top_k_landmarks": int(args.top_k_landmarks),
+            "pred_err_all": np.nan,
+            "pred_err_filtered": np.nan,
+            "pred_err_gt": np.nan,
+            "pred_better": "unavailable",
+            "rot_err_all": np.nan,
+            "rot_err_all_axis_0": np.nan,
+            "rot_err_all_axis_1": np.nan,
+            "rot_err_all_axis_2": np.nan,
+            "rot_err_filtered": np.nan,
+            "rot_err_filtered_axis_0": np.nan,
+            "rot_err_filtered_axis_1": np.nan,
+            "rot_err_filtered_axis_2": np.nan,
+            "rot_err_weighted_ver1": np.nan,
+            "rot_err_weighted_ver1_axis_0": np.nan,
+            "rot_err_weighted_ver1_axis_1": np.nan,
+            "rot_err_weighted_ver1_axis_2": np.nan,
+            "rot_err_weighted_ver2": np.nan,
+            "rot_err_weighted_ver2_axis_0": np.nan,
+            "rot_err_weighted_ver2_axis_1": np.nan,
+            "rot_err_weighted_ver2_axis_2": np.nan,
+            "rot_err_weighted_ver3": np.nan,
+            "rot_err_weighted_ver3_axis_0": np.nan,
+            "rot_err_weighted_ver3_axis_1": np.nan,
+            "rot_err_weighted_ver3_axis_2": np.nan,
+            "rot_err_gt": np.nan,
+            "rot_err_gt_axis_0": np.nan,
+            "rot_err_gt_axis_1": np.nan,
+            "rot_err_gt_axis_2": np.nan,
+            "trans_err_all": np.nan,
+            "trans_err_filtered": np.nan,
+            "trans_err_weighted_ver1": np.nan,
+            "trans_err_weighted_ver2": np.nan,
+            "trans_err_weighted_ver3": np.nan,
+            "trans_err_gt": np.nan,
+            "pose_better": "unavailable",
+            "pose_better_gt": "unavailable",
+            "base_visible_count": 0,
+            "candidate_uncertainty_count": 0,
+            "dropped_landmark_count": 0,
+            "retained_landmark_count": 0,
+            "gt_filtered_retained_count": 0,
+            "lt3_base_visible": False,
+            "lt3_after_filtering": False,
+            "lt3_after_gt_filtering": False,
+            "valid_pose_all": False,
+            "valid_pose_filtered": False,
+            "valid_pose_weighted_ver1": False,
+            "valid_pose_weighted_ver2": False,
+            "valid_pose_weighted_ver3": False,
+            "valid_pose_gt": False,
+            "status": "initialized",
+        }
+
     with torch.no_grad():
         for idx, (image, specimen_id, image_name, landmarks, pose_params) in tqdm(enumerate(test_loader)):
             specimen_id = specimen_id[0]
             image_name = image_name[0]  # must match 'image_id' in CSVs
+            result_row = default_result_row(image_name)
 
             # =====================================================
             # GT pose parameters
@@ -138,10 +213,8 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
             else:
                 raise ValueError(f"Unknown visibility_mode: {args.visibility_mode}")
 
-            # If too few base visible lms, skip
-            if base_mask.sum() < 3:
-                print(f"[Skipping] {image_name}: < 3 base visible landmarks (mode={args.visibility_mode})")
-                continue
+            result_row["base_visible_count"] = int(base_mask.sum())
+            result_row["lt3_base_visible"] = result_row["base_visible_count"] < 3
 
             # =====================================================
             # Per-image per-landmark uncertainty: cluster distance
@@ -176,7 +249,7 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
             weights_ver1 = np.nan_to_num(inverse, nan=1.0, posinf=1.0, neginf=0.0).astype(np.float32)
 
             ## Version2: Softmax-like weighting
-            beta = 0.01  # can try higher values too
+            beta = args.uncertainty_weight_beta
 
             eps = 1e-6
             deviation = np.nan_to_num(cluster_vals.copy(), nan=np.nanmedian(cluster_vals))
@@ -194,6 +267,7 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
             # candidate landmarks for uncertainty-based dropping
             candidate_mask = base_mask & ~np.isnan(cluster_vals)
             uncertain_mask = np.zeros_like(base_mask)
+            result_row["candidate_uncertainty_count"] = int(candidate_mask.sum())
 
             if args.top_k_landmarks > 0 and candidate_mask.sum() > args.top_k_landmarks:
                 valid_indices = np.where(candidate_mask)[0]
@@ -204,11 +278,9 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
 
             # final filtered mask: base visible but not top-k uncertain
             filtered_mask = base_mask & ~uncertain_mask
-
-            # Require at least 3 landmarks after filtering
-            if filtered_mask.sum() < 3:
-                print(f"[Skipping] {image_name}: < 3 landmarks after filtering")
-                continue
+            result_row["dropped_landmark_count"] = int(uncertain_mask.sum())
+            result_row["retained_landmark_count"] = int(filtered_mask.sum())
+            result_row["lt3_after_filtering"] = result_row["retained_landmark_count"] < 3
 
             # =====================================================
             # Build 3D landmarks as before (unchanged)
@@ -263,11 +335,13 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
             pred_all = pred_coords_np.copy()
             pred_all[~base_mask] = np.nan
             pred_err_all = float(np.sqrt(np.nanmean((pred_all - Point_2D_landmark_cv2) ** 2)))
+            result_row["pred_err_all"] = pred_err_all
 
             # Filtered: base visible but drop top-k uncertain
             pred_filt = pred_coords_np.copy()
             pred_filt[~filtered_mask] = np.nan
             pred_err_filtered = float(np.sqrt(np.nanmean((pred_filt - Point_2D_landmark_cv2) ** 2)))
+            result_row["pred_err_filtered"] = pred_err_filtered
 
             if abs(pred_err_filtered - pred_err_all) < eps_pred:
                 pred_better = "tie"
@@ -275,6 +349,13 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
                 pred_better = "filtered"
             else:
                 pred_better = "all"
+            result_row["pred_better"] = pred_better
+
+            if result_row["lt3_base_visible"]:
+                print(f"[Skipping] {image_name}: < 3 base visible landmarks (mode={args.visibility_mode})")
+                result_row["status"] = "invalid_base_visibility"
+                all_results.append(result_row)
+                continue
 
             # # =====================================================
             # # 2) Pose estimation errors (All vs Filtered)
@@ -348,113 +429,96 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
 
             if np.isnan(rot_all).any() or np.isnan(trans_all).any():
                 print(f"[Skipping] {image_name}: not enough valid landmarks for ALL pose (pred-based)")
+                result_row["status"] = "invalid_pose_all"
+                all_results.append(result_row)
                 continue
 
-            # rot_err_all = np.linalg.norm(rot_all - rotation_gt)
-            # trans_err_all = np.linalg.norm(trans_all - translation_gt_adj)
-            # rot_err_all = float(np.sqrt(np.nanmean((rot_all - rotation_gt) ** 2)))
-            rot_err_all = compute_geodesic_distance(rot_all, rotation_gt, seq='yxz')
-            per_axis_errors = compute_euler_error_wrapped(rot_all, rotation_gt)
-            rot_err_all = float(np.sqrt(np.nanmean(per_axis_errors ** 2)))
-            trans_err_all = float(np.sqrt(np.nanmean((trans_all - translation_gt_adj) ** 2)))
+            result_row["valid_pose_all"] = True
+            per_axis_errors_all_img = compute_euler_error_wrapped(rot_all, rotation_gt)
+            per_axis_errors_all['all'].append(per_axis_errors_all_img)
+            rot_err_all = rmse_or_nan(per_axis_errors_all_img)
+            trans_err_all = rmse_or_nan(trans_all - translation_gt_adj)
+            result_row["rot_err_all"] = rot_err_all
+            result_row["rot_err_all_axis_0"] = float(per_axis_errors_all_img[0])
+            result_row["rot_err_all_axis_1"] = float(per_axis_errors_all_img[1])
+            result_row["rot_err_all_axis_2"] = float(per_axis_errors_all_img[2])
+            result_row["trans_err_all"] = trans_err_all
+
+            rot_err_filt = np.nan
+            trans_err_filt = np.nan
 
             # --- Filtered ---
-            L_Proj_pred_filt = pred_filt.copy()
+            if not result_row["lt3_after_filtering"]:
+                L_Proj_pred_filt = pred_filt.copy()
+                L_Proj_pred_filt[:, 1] -= args.image_resize / 2
+                L_Proj_pred_filt[:, 0] -= args.image_resize / 2
+                L_Proj_pred_filt[:, 1] *= -1
 
-            L_Proj_pred_filt[:, 1] -= args.image_resize / 2
-            L_Proj_pred_filt[:, 0] -= args.image_resize / 2
-            L_Proj_pred_filt[:, 1] *= -1
+                rot_filt, trans_filt = pose_estimation(
+                    Point_3D_landmark, L_Proj_pred_filt, sdd, svd, vdd, manual_translations_list
+                )
 
-            rot_filt, trans_filt = pose_estimation(
-                Point_3D_landmark, L_Proj_pred_filt, sdd, svd, vdd, manual_translations_list
-            )
-            # print(L_Proj_pred_filt)
-
-            if np.isnan(rot_filt).any() or np.isnan(trans_filt).any():
-                print(f"[Skipping] {image_name}: not enough valid landmarks for FILTERED pose (pred-based)")
-                continue
-
-            # rot_err_filt = np.linalg.norm(rot_filt - rotation_gt)
-            # trans_err_filt = np.linalg.norm(trans_filt - translation_gt_adj)
-            # rot_err_filt = float(np.sqrt(np.nanmean((rot_filt - rotation_gt) ** 2)))
-            rot_err_filt = compute_geodesic_distance(rot_filt, rotation_gt, seq='yxz')
-            per_axis_errors = compute_euler_error_wrapped(rot_filt, rotation_gt)
-            rot_err_filt = float(np.sqrt(np.nanmean(per_axis_errors ** 2)))
-            trans_err_filt = float(np.sqrt(np.nanmean((trans_filt - translation_gt_adj) ** 2)))
+                if np.isnan(rot_filt).any() or np.isnan(trans_filt).any():
+                    print(f"[Skipping] {image_name}: not enough valid landmarks for FILTERED pose (pred-based)")
+                else:
+                    result_row["valid_pose_filtered"] = True
+                    per_axis_errors_filt_img = compute_euler_error_wrapped(rot_filt, rotation_gt)
+                    per_axis_errors_all['filtered'].append(per_axis_errors_filt_img)
+                    rot_err_filt = rmse_or_nan(per_axis_errors_filt_img)
+                    trans_err_filt = rmse_or_nan(trans_filt - translation_gt_adj)
+                    result_row["rot_err_filtered"] = rot_err_filt
+                    result_row["rot_err_filtered_axis_0"] = float(per_axis_errors_filt_img[0])
+                    result_row["rot_err_filtered_axis_1"] = float(per_axis_errors_filt_img[1])
+                    result_row["rot_err_filtered_axis_2"] = float(per_axis_errors_filt_img[2])
+                    result_row["trans_err_filtered"] = trans_err_filt
+            else:
+                print(f"[Skipping] {image_name}: < 3 landmarks after filtering")
 
             # Compare
-            if (abs(rot_err_filt - rot_err_all) < eps_rot and
-                abs(trans_err_filt - trans_err_all) < eps_trans):
-                pose_better = "tie"
-            elif (rot_err_filt < rot_err_all and trans_err_filt < trans_err_all):
-                pose_better = "filtered"
-            else:
-                pose_better = "all"
+            if np.isfinite(rot_err_filt) and np.isfinite(trans_err_filt):
+                if (abs(rot_err_filt - rot_err_all) < eps_rot and
+                    abs(trans_err_filt - trans_err_all) < eps_trans):
+                    result_row["pose_better"] = "tie"
+                elif (rot_err_filt < rot_err_all and trans_err_filt < trans_err_all):
+                    result_row["pose_better"] = "filtered"
+                else:
+                    result_row["pose_better"] = "all"
 
-            # =====================================================
-            # 3) Pose estimation using WEIGHTED PREDICTED LANDMARKS
-            # =====================================================
+                # =====================================================
+                # 3) Pose estimation using WEIGHTED PREDICTED LANDMARKS
+                # =====================================================
 
-            # Convert ALL predicted CV2 coords → projection-plane
-            L_Proj_pred_w = pred_filt.copy()
+                L_Proj_pred_w = pred_filt.copy()
+                L_Proj_pred_w[:, 1] -= args.image_resize / 2
+                L_Proj_pred_w[:, 0] -= args.image_resize / 2
+                L_Proj_pred_w[:, 1] *= -1
 
-            L_Proj_pred_w[:, 1] -= args.image_resize / 2
-            L_Proj_pred_w[:, 0] -= args.image_resize / 2
-            L_Proj_pred_w[:, 1] *= -1
+                weighted_versions = [
+                    ("weighted_ver1", weights_ver1),
+                    ("weighted_ver2", weights_ver2),
+                    ("weighted_ver3", weights_ver3),
+                ]
 
-            # Version 1 weights
-            rot_w, trans_w = pose_estimation_weighted(
-                Point_3D_landmark,
-                L_Proj_pred_w,
-                weights_ver1,
-                sdd, svd, vdd,
-                manual_translations_list
-            )
+                for version_name, version_weights in weighted_versions:
+                    rot_w, trans_w = pose_estimation_weighted(
+                        Point_3D_landmark,
+                        L_Proj_pred_w,
+                        version_weights,
+                        sdd, svd, vdd,
+                        manual_translations_list
+                    )
+                    if np.isnan(rot_w).any() or np.isnan(trans_w).any():
+                        print(f"[Skipping] {image_name}: not enough valid landmarks for {version_name} pose")
+                        continue
 
-            if np.isnan(rot_w).any() or np.isnan(trans_w).any():
-                print(f"[Skipping] {image_name}: not enough valid landmarks for WEIGHTED pose")
-                continue
-
-            # Weighted pose error
-            # rot_err_w_ver1 = float(np.sqrt(np.mean((rot_w - rotation_gt)**2)))
-            rot_err_w_ver1 = compute_geodesic_distance(rot_w, rotation_gt, seq='yxz')
-            per_axis_errors = compute_euler_error_wrapped(rot_w, rotation_gt)
-            rot_err_w_ver1 = float(np.sqrt(np.nanmean(per_axis_errors ** 2)))
-            trans_err_w_ver1 = float(np.sqrt(np.mean((trans_w - translation_gt_adj)**2)))
-
-            # Version 2 weights
-            rot_w, trans_w = pose_estimation_weighted(
-                Point_3D_landmark,
-                L_Proj_pred_w,
-                weights_ver2,
-                sdd, svd, vdd,
-                manual_translations_list
-            )
-            if np.isnan(rot_w).any() or np.isnan(trans_w).any():
-                print(f"[Skipping] {image_name}: not enough valid landmarks for WEIGHTED pose")
-                continue    
-            # rot_err_w_ver2 = float(np.sqrt(np.mean((rot_w - rotation_gt)**2)))   
-            rot_err_w_ver2 = compute_geodesic_distance(rot_w, rotation_gt, seq='yxz')
-            per_axis_errors = compute_euler_error_wrapped(rot_w, rotation_gt)
-            rot_err_w_ver2 = float(np.sqrt(np.nanmean(per_axis_errors ** 2)))
-            trans_err_w_ver2 = float(np.sqrt(np.mean((trans_w - translation_gt_adj)**2)))
-
-            # Version 3 weights
-            rot_w, trans_w = pose_estimation_weighted(
-                Point_3D_landmark,
-                L_Proj_pred_w,
-                weights_ver3,
-                sdd, svd, vdd,
-                manual_translations_list
-            )
-            if np.isnan(rot_w).any() or np.isnan(trans_w).any():
-                print(f"[Skipping] {image_name}: not enough valid landmarks for WEIGHTED pose")
-                continue    
-            # rot_err_w_ver3 = float(np.sqrt(np.mean((rot_w - rotation_gt)**2)))   
-            rot_err_w_ver3 = compute_geodesic_distance(rot_w, rotation_gt, seq='yxz')
-            per_axis_errors = compute_euler_error_wrapped(rot_w, rotation_gt)
-            rot_err_w_ver3 = float(np.sqrt(np.nanmean(per_axis_errors ** 2)))
-            trans_err_w_ver3 = float(np.sqrt(np.mean((trans_w - translation_gt_adj)**2)))
+                    per_axis_errors_weighted = compute_euler_error_wrapped(rot_w, rotation_gt)
+                    per_axis_errors_all[version_name].append(per_axis_errors_weighted)
+                    result_row[f"valid_pose_{version_name}"] = True
+                    result_row[f"rot_err_{version_name}"] = rmse_or_nan(per_axis_errors_weighted)
+                    result_row[f"rot_err_{version_name}_axis_0"] = float(per_axis_errors_weighted[0])
+                    result_row[f"rot_err_{version_name}_axis_1"] = float(per_axis_errors_weighted[1])
+                    result_row[f"rot_err_{version_name}_axis_2"] = float(per_axis_errors_weighted[2])
+                    result_row[f"trans_err_{version_name}"] = rmse_or_nan(trans_w - translation_gt_adj)
 
 
             # print()
@@ -493,69 +557,99 @@ def uncertainty_evaluation(args, model, test_loader, device, cluster_pivot):
             filtered_mask_gt = base_mask & ~uncertain_mask_gt
 
             # landmark 최소 개수(3개) 검사
-            if filtered_mask_gt.sum() < 3:
+            result_row["gt_filtered_retained_count"] = int(filtered_mask_gt.sum())
+            result_row["lt3_after_gt_filtering"] = result_row["gt_filtered_retained_count"] < 3
+            if result_row["lt3_after_gt_filtering"]:
                 print(f"[Skipping GT-filter] {image_name}: < 3 landmarks after GT-distance filtering")
-                filtered_mask_gt = None  # invalidate
-
             pred_gt = pred_coords_np.copy()
             pred_gt[~filtered_mask_gt] = np.nan
-            pred_err_gt = float(np.sqrt(np.nanmean((pred_gt - Point_2D_landmark_cv2)**2)))
+            result_row["pred_err_gt"] = float(np.sqrt(np.nanmean((pred_gt - Point_2D_landmark_cv2)**2)))
 
-            # =====================================================
-            # 5) Pose estimation (predicted 2D) — GT-distance filtered
-            # =====================================================
-            # predicted coords → projection-plane 변환
-            L_Proj_pred_gt = pred_gt.copy()
-            L_Proj_pred_gt[:, 1] -= args.image_resize / 2
-            L_Proj_pred_gt[:, 0] -= args.image_resize / 2
-            L_Proj_pred_gt[:, 1] *= -1
+            if not result_row["lt3_after_gt_filtering"]:
+                # =====================================================
+                # 5) Pose estimation (predicted 2D) — GT-distance filtered
+                # =====================================================
+                L_Proj_pred_gt = pred_gt.copy()
+                L_Proj_pred_gt[:, 1] -= args.image_resize / 2
+                L_Proj_pred_gt[:, 0] -= args.image_resize / 2
+                L_Proj_pred_gt[:, 1] *= -1
 
-            rot_gt, trans_gt = pose_estimation(
-                Point_3D_landmark, L_Proj_pred_gt, sdd, svd, vdd, manual_translations_list
-            )
+                rot_gt, trans_gt = pose_estimation(
+                    Point_3D_landmark, L_Proj_pred_gt, sdd, svd, vdd, manual_translations_list
+                )
 
-            # rot_err_gt = float(np.sqrt(np.nanmean((rot_gt - rotation_gt)**2)))
-            rot_err_gt = compute_geodesic_distance(rot_gt, rotation_gt, seq='yxz')
-            per_axis_errors = compute_euler_error_wrapped(rot_gt, rotation_gt)
-            rot_err_gt = float(np.sqrt(np.nanmean(per_axis_errors ** 2)))
-            trans_err_gt = float(np.sqrt(np.nanmean((trans_gt - translation_gt_adj)**2)))
+                if not (np.isnan(rot_gt).any() or np.isnan(trans_gt).any()):
+                    result_row["valid_pose_gt"] = True
+                    per_axis_errors_gt_img = compute_euler_error_wrapped(rot_gt, rotation_gt)
+                    per_axis_errors_all['gt'].append(per_axis_errors_gt_img)
+                    rot_err_gt = rmse_or_nan(per_axis_errors_gt_img)
+                    trans_err_gt = rmse_or_nan(trans_gt - translation_gt_adj)
+                    result_row["rot_err_gt"] = rot_err_gt
+                    result_row["rot_err_gt_axis_0"] = float(per_axis_errors_gt_img[0])
+                    result_row["rot_err_gt_axis_1"] = float(per_axis_errors_gt_img[1])
+                    result_row["rot_err_gt_axis_2"] = float(per_axis_errors_gt_img[2])
+                    result_row["trans_err_gt"] = trans_err_gt
 
-            # All vs GT-filtered 비교
-            if (abs(rot_err_gt - rot_err_all) < eps_rot and
-                abs(trans_err_gt - trans_err_all) < eps_trans):
-                pose_better_gt = "tie"
-            elif (rot_err_gt < rot_err_all and trans_err_gt < trans_err_all):
-                pose_better_gt = "gt_filtered"
+                    if (abs(rot_err_gt - rot_err_all) < eps_rot and
+                        abs(trans_err_gt - trans_err_all) < eps_trans):
+                        result_row["pose_better_gt"] = "tie"
+                    elif (rot_err_gt < rot_err_all and trans_err_gt < trans_err_all):
+                        result_row["pose_better_gt"] = "gt_filtered"
+                    else:
+                        result_row["pose_better_gt"] = "all"
+
+            if result_row["valid_pose_filtered"] and result_row["valid_pose_weighted_ver2"]:
+                result_row["status"] = "ok"
+            elif result_row["lt3_after_filtering"]:
+                result_row["status"] = "invalid_filtered_visibility"
+            elif not result_row["valid_pose_filtered"]:
+                result_row["status"] = "invalid_pose_filtered"
+            elif not result_row["valid_pose_weighted_ver2"]:
+                result_row["status"] = "invalid_pose_weighted_ver2"
             else:
-                pose_better_gt = "all"
+                result_row["status"] = "partial"
 
-            # =====================================================
-            # Store per-image results
-            # =====================================================
-            all_results.append({
-                "image": image_name,
-                "pred_err_all": pred_err_all,
-                "pred_err_filtered": pred_err_filtered,
-                "pred_err_gt": pred_err_gt,
-                "pred_better": pred_better,
+            all_results.append(result_row)
 
-                "rot_err_all": rot_err_all,
-                "rot_err_filtered": rot_err_filt,
-                "rot_err_weighted_ver1": rot_err_w_ver1,
-                "rot_err_weighted_ver2": rot_err_w_ver2,
-                "rot_err_weighted_ver3": rot_err_w_ver3,
-                "rot_err_gt": rot_err_gt,
-
-                "trans_err_all": trans_err_all,
-                "trans_err_filtered": trans_err_filt,
-                "trans_err_weighted_ver1": trans_err_w_ver1,
-                "trans_err_weighted_ver2": trans_err_w_ver2,
-                "trans_err_weighted_ver3": trans_err_w_ver3,
-                "trans_err_gt": trans_err_gt,
-                
-                "pose_better": pose_better,
-                # "pose_better_weighted": pose_better_w,
-                "pose_better_gt": pose_better_gt,
-            })
+    # =====================================================
+    # Compute per-axis RMSE across all images
+    # =====================================================
+    per_axis_rmse = {}
+    for key, error_list in per_axis_errors_all.items():
+        if len(error_list) > 0:
+            # Stack all per-axis errors: shape (N_images, 3)
+            errors_array = np.array(error_list)
+            # Compute RMSE per axis: shape (3,)
+            per_axis_rmse[key] = {
+                'axis_0': float(np.sqrt(np.mean(errors_array[:, 0] ** 2))),
+                'axis_1': float(np.sqrt(np.mean(errors_array[:, 1] ** 2))),
+                'axis_2': float(np.sqrt(np.mean(errors_array[:, 2] ** 2))),
+                'all_axes': float(np.sqrt(np.mean(errors_array ** 2)))  # Overall RMSE across all axes
+            }
+        else:
+            per_axis_rmse[key] = {
+                'axis_0': np.nan,
+                'axis_1': np.nan,
+                'axis_2': np.nan,
+                'all_axes': np.nan
+            }
+    
+    # Print per-axis RMSE summary
+    print("\n" + "="*80)
+    print("Per-Axis Rotational Error RMSE Summary")
+    print("="*80)
+    for key, rmse_dict in per_axis_rmse.items():
+        if not np.isnan(rmse_dict['all_axes']):
+            print(f"{key:20s}: Axis 0 = {rmse_dict['axis_0']:6.2f}°, "
+                  f"Axis 1 = {rmse_dict['axis_1']:6.2f}°, "
+                  f"Axis 2 = {rmse_dict['axis_2']:6.2f}°, "
+                  f"Overall = {rmse_dict['all_axes']:6.2f}°")
+    print("="*80 + "\n")
+    
+    # Store per-axis RMSE in results for CSV export
+    # Add as a special entry that will be converted to summary rows
+    all_results.append({
+        "_per_axis_rmse": per_axis_rmse
+    })
 
     return all_results

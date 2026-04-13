@@ -70,6 +70,10 @@ if __name__ == "__main__":
     parser.add_argument("--dropout_rate", type=float, default=0.1, help="Dropout rate for model uncertainty estimation")
     parser.add_argument("--top_k_landmarks", type=int, default=0, help="Number of top uncertain landmarks to filter out")
     parser.add_argument("--finetune_version", type=str, default="v2", choices=["v1", "v2", "v3"], help="Version of finetuning approach")
+    parser.add_argument("--uncertainty_weight_beta", type=float, default=0.01, help="Beta used by the test-time continuous uncertainty-to-weight mapping")
+    parser.add_argument("--finetune_beta_v2", type=float, default=0.02, help="Beta used by finetune version v2 weighting")
+    parser.add_argument("--finetune_beta_v3", type=float, default=0.02, help="Beta used by finetune version v3 weighting")
+    parser.add_argument("--output_tag", type=str, default="", help="Optional suffix appended to the test output folder name for sweep runs")
 
     # Visibility / filtering mode
     parser.add_argument("--visibility_mode", type=str, default="pred", choices=["pred", "gt", "both"], help="How to determine which landmarks exist: 'pred' = prediction-based, 'gt' = ground truth based, 'both' = intersection")

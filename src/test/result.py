@@ -6,6 +6,12 @@ def save_csv(args, all_results, suffix=""):
     # ============================================================
     # SAVE RESULTS TO CSV (same columns as before)
     # ============================================================
+    # Extract per-axis RMSE if present
+    per_axis_rmse = None
+    if all_results and "_per_axis_rmse" in all_results[-1]:
+        per_axis_rmse = all_results[-1]["_per_axis_rmse"]
+        all_results = all_results[:-1]  # Remove the special entry
+    
     results_df = pd.DataFrame(all_results)
 
     # Difference columns
@@ -62,40 +68,110 @@ def save_csv(args, all_results, suffix=""):
             #     "pose_better_weighted": pose_better_w,
             # })
 
-    results_df = results_df[
-        [
-            "image",
-            "pred_err_all",
-            "pred_err_filtered",
-            "pred_diff_filtered",
-            "pred_err_gt",
-            "pred_diff_gt",
+    # Build column list with per-axis columns
+    base_columns = [
+        "image",
+        "pred_err_all",
+        "pred_err_filtered",
+        "pred_diff_filtered",
+        "pred_err_gt",
+        "pred_diff_gt",
 
-            "rot_err_all",
-            "rot_err_filtered",
-            "rot_diff_filtered",
-            "rot_err_weighted_ver1",
-            "rot_diff_weighted_ver1",
-            "rot_err_weighted_ver2",
-            "rot_diff_weighted_ver2",
-            "rot_err_weighted_ver3",
-            "rot_diff_weighted_ver3",
-            "rot_err_gt",
-            "rot_diff_gt",
+        "rot_err_all",
+        "rot_err_all_axis_0",
+        "rot_err_all_axis_1",
+        "rot_err_all_axis_2",
+        "rot_err_filtered",
+        "rot_err_filtered_axis_0",
+        "rot_err_filtered_axis_1",
+        "rot_err_filtered_axis_2",
+        "rot_diff_filtered",
+        "rot_err_weighted_ver1",
+        "rot_err_weighted_ver1_axis_0",
+        "rot_err_weighted_ver1_axis_1",
+        "rot_err_weighted_ver1_axis_2",
+        "rot_diff_weighted_ver1",
+        "rot_err_weighted_ver2",
+        "rot_err_weighted_ver2_axis_0",
+        "rot_err_weighted_ver2_axis_1",
+        "rot_err_weighted_ver2_axis_2",
+        "rot_diff_weighted_ver2",
+        "rot_err_weighted_ver3",
+        "rot_err_weighted_ver3_axis_0",
+        "rot_err_weighted_ver3_axis_1",
+        "rot_err_weighted_ver3_axis_2",
+        "rot_diff_weighted_ver3",
+        "rot_err_gt",
+        "rot_err_gt_axis_0",
+        "rot_err_gt_axis_1",
+        "rot_err_gt_axis_2",
+        "rot_diff_gt",
 
-            "trans_err_all",
-            "trans_err_filtered",
-            "trans_diff_filtered",
-            "trans_err_weighted_ver1",
-            "trans_diff_weighted_ver1",
-            "trans_err_weighted_ver2",
-            "trans_diff_weighted_ver2",
-            "trans_err_weighted_ver3",
-            "trans_diff_weighted_ver3",
-            "trans_err_gt",
-            "trans_diff_gt",
-        ]
+        "trans_err_all",
+        "trans_err_filtered",
+        "trans_diff_filtered",
+        "trans_err_weighted_ver1",
+        "trans_diff_weighted_ver1",
+        "trans_err_weighted_ver2",
+        "trans_diff_weighted_ver2",
+        "trans_err_weighted_ver3",
+        "trans_diff_weighted_ver3",
+        "trans_err_gt",
+        "trans_diff_gt",
     ]
+    
+    # Keep the historical ordering first, but preserve new metadata columns as well.
+    available_columns = [col for col in base_columns if col in results_df.columns]
+    extra_columns = [col for col in results_df.columns if col not in available_columns]
+    results_df = results_df[available_columns + extra_columns]
+    
+    # Add per-axis RMSE summary rows if available
+    if per_axis_rmse is not None:
+        rmse_rows = []
+        for key, rmse_dict in per_axis_rmse.items():
+            if not pd.isna(rmse_dict['all_axes']):
+                row = {"image": f"RMSE_{key}"}
+                # Add RMSE values for each rotation error type
+                if key == "all":
+                    row["rot_err_all"] = rmse_dict['all_axes']
+                    row["rot_err_all_axis_0"] = rmse_dict['axis_0']
+                    row["rot_err_all_axis_1"] = rmse_dict['axis_1']
+                    row["rot_err_all_axis_2"] = rmse_dict['axis_2']
+                elif key == "filtered":
+                    row["rot_err_filtered"] = rmse_dict['all_axes']
+                    row["rot_err_filtered_axis_0"] = rmse_dict['axis_0']
+                    row["rot_err_filtered_axis_1"] = rmse_dict['axis_1']
+                    row["rot_err_filtered_axis_2"] = rmse_dict['axis_2']
+                elif key == "weighted_ver1":
+                    row["rot_err_weighted_ver1"] = rmse_dict['all_axes']
+                    row["rot_err_weighted_ver1_axis_0"] = rmse_dict['axis_0']
+                    row["rot_err_weighted_ver1_axis_1"] = rmse_dict['axis_1']
+                    row["rot_err_weighted_ver1_axis_2"] = rmse_dict['axis_2']
+                elif key == "weighted_ver2":
+                    row["rot_err_weighted_ver2"] = rmse_dict['all_axes']
+                    row["rot_err_weighted_ver2_axis_0"] = rmse_dict['axis_0']
+                    row["rot_err_weighted_ver2_axis_1"] = rmse_dict['axis_1']
+                    row["rot_err_weighted_ver2_axis_2"] = rmse_dict['axis_2']
+                elif key == "weighted_ver3":
+                    row["rot_err_weighted_ver3"] = rmse_dict['all_axes']
+                    row["rot_err_weighted_ver3_axis_0"] = rmse_dict['axis_0']
+                    row["rot_err_weighted_ver3_axis_1"] = rmse_dict['axis_1']
+                    row["rot_err_weighted_ver3_axis_2"] = rmse_dict['axis_2']
+                elif key == "gt":
+                    row["rot_err_gt"] = rmse_dict['all_axes']
+                    row["rot_err_gt_axis_0"] = rmse_dict['axis_0']
+                    row["rot_err_gt_axis_1"] = rmse_dict['axis_1']
+                    row["rot_err_gt_axis_2"] = rmse_dict['axis_2']
+                rmse_rows.append(row)
+        
+        if rmse_rows:
+            ordered_columns = list(results_df.columns)
+            aligned_rmse_rows = [
+                {col: row.get(col, None) for col in ordered_columns}
+                for row in rmse_rows
+            ]
+            combined_rows = results_df.to_dict("records") + aligned_rmse_rows
+            results_df = pd.DataFrame(combined_rows, columns=ordered_columns)
 
     
     csv_path = os.path.join(

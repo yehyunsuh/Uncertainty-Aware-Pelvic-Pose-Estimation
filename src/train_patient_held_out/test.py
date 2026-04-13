@@ -14,6 +14,7 @@ from src.test.data import load_or_compute_per_image_uncertainty, save_prediction
 from src.test.uncertainty import uncertainty_evaluation
 from src.test.result import save_csv
 from src.test.visualization import plot_overall_trends
+from src.sweep.main import save_run_summary
 
 
 # Your specific color palette
@@ -298,7 +299,7 @@ def test_model_uncertainty_parallel(args, model, device, test_loader, overlay_di
         # ---------- Save Uncertainty Overlay ----------
         if overlay_dir is not None:
             # Note: This logic assumes batch_size=1 for the data loader
-            img_path = f'data/DeepFluoro/17-1882/drr_projections_hard/{specimen_id[0]}_{image_name[0]}'
+            img_path = f'data/DeepFluoro/{specimen_id[0]}/drr_projections_hard/{specimen_id[0]}_{image_name[0]}'
             out_path = os.path.join(overlay_dir, image_name[0].replace('.png', '_uncertainty_parallel.png'))
             
             cv2_img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
@@ -339,7 +340,10 @@ def test_model_uncertainty_parallel(args, model, device, test_loader, overlay_di
 
 
 def test(args, model, model_dropout, device):
-    args.save_folder_name = f"prediction_{args.dropout_rate}_{args.model_weight_name}"
+    folder_name = f"prediction_{args.dropout_rate}_{args.model_weight_name}"
+    if args.output_tag:
+        folder_name = f"{folder_name}_{args.output_tag}"
+    args.save_folder_name = folder_name
     csv_dir = os.path.join(args.vis_dir, args.save_folder_name, "csv_results")
     plot_dir = os.path.join(args.vis_dir, args.save_folder_name, "uncertainty_plots")
     os.makedirs(csv_dir, exist_ok=True)
@@ -374,6 +378,7 @@ def test(args, model, model_dropout, device):
         
         end_time = time.time()
         print(f"Test Uncertainty Time: {end_time - start_time:.2f} seconds")
+        save_predictions_csv(args, image_names, csv_dir, mc_preds, gt_coords, prefix="mc_predictions")
 
     df_unc, cluster_pivot = load_or_compute_per_image_uncertainty(csv_dir, dropout_rate=args.dropout_rate)
 
@@ -382,7 +387,7 @@ def test(args, model, model_dropout, device):
     all_results = uncertainty_evaluation(args, model, test_loader, device, cluster_pivot)
     end_time = time.time()
     print(f"Uncertainty Evaluation Time: {end_time - start_time:.2f} seconds")
-    exit()
     
     results_df = save_csv(args, all_results, suffix=suffix)
     plot_overall_trends(args, results_df, plot_dir, suffix=suffix)
+    save_run_summary(args, results_df, suffix=suffix)

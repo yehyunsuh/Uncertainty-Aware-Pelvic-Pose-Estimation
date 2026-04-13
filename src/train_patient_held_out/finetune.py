@@ -259,13 +259,13 @@ def train_finetune_model(args, model, model_uncertainty, device, train_loader, v
         weights_ver1 = inv_norm                      # [B, 14]
 
         # Version 2 — Softmax weighting
-        beta2 = 0.02
+        beta2 = args.finetune_beta_v2
         soft_vals = torch.exp(-beta2 * uncertainty_rms)    # [B, 14]
         soft_norm = soft_vals / soft_vals.max(dim=1, keepdim=True).values
         weights_ver2 = soft_norm                     # [B, 14]
 
         # Version 3 — Soft-rank via softmax(-β · uncertainty_rms)
-        beta3 = 0.02
+        beta3 = args.finetune_beta_v3
         weights_ver3 = torch.softmax(-beta3 * uncertainty_rms, dim=1)   # [B, 14]
 
         if args.finetune_version == "v1":
