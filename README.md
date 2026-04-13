@@ -39,20 +39,17 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 pip install opencv-python h5py numpy nibabel tqdm scipy diffdrr albumentations wandb segmentation_models_pytorch scikit-learn seaborn matplotlib pandas
 ```
 
-## Dataset And Setup
-
-Download the DeepFluoro archive into `data/`, then run:
-
-- `script/1_data.sh`
-
-This prepares the extracted dataset and baseline DRRs.
+## Dataset
+Download the DeepFluoro archive into `data/` using
+```
+wget --no-check-certificate -O data/ipcai_2020_full_res_data.zip "http://archive.data.jhu.edu/api/access/datafile/:persistentId/?persistentId=doi:10.7281/T1/IFSXNV/EAN9GH"
+```
 
 ## Reproduction Workflow
 
 Use the canonical shell launchers in `script/`:
 
 1. Data preparation
-   - `wget --no-check-certificate -O data/ipcai_2020_full_res_data.zip "http://archive.data.jhu.edu/api/access/datafile/:persistentId/?persistentId=doi:10.7281/T1/IFSXNV/EAN9GH"`
    - `script/1_data.sh`
 3. Patient-held-out training
    - `script/2_train_patient_held_out.sh`
