@@ -2,18 +2,7 @@
 
 ## Introduction
 
-This repository contains the code for uncertainty-aware landmark-based 2D/3D pelvic pose estimation from DeepFluoro data.
-
-The main reproduction path is:
-- data extraction
-- DRR generation
-- patient-held-out training
-- MC-dropout testing
-- finetuning
-- final result aggregation
-
-Optional real-image experiments are also included:
-- [src/train_deepfluoro_real/](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/src/train_deepfluoro_real/README.md)
+An uncertainty-aware landmark-based 2D/3D pelvic registration framework that uses MC-dropout-derived reliability to improve pose estimation in both synthetic and real fluoroscopy.
 
 ## Directory Structure
 
@@ -30,22 +19,13 @@ Optional real-image experiments are also included:
 │   ├── train/
 │   ├── train_patient_held_out/
 │   ├── train_deepfluoro_real/
-│   ├── deepfluoro_real/
-│   └── sweep/
+│   └── deepfluoro_real/
 ├── analysis/
 ├── model_weight/
 ├── results/
 └── visualizations/
 ```
-
-## Active Code Paths
-
-- Data preparation: [data/README.md](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/data/README.md)
-- DRR Image Experiments: [src/train_patient_held_out/](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/src/train_patient_held_out/README.md)
-- Fluoro Image Experiments: [src/train_deepfluoro_real/](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/src/train_deepfluoro_real/README.md)
-
 ## Prerequisites
-
 - Python 3.10
 - PyTorch with CUDA support
 - DeepFluoro dataset archive
@@ -81,7 +61,7 @@ Use the canonical shell launchers in `script/`:
    - `script/4_finetune_patient_held_out.sh`
 5. Finetuned testing
    - `script/5_test_finetune*.sh`
-6. Optional real-image experiments
+6. Fluoroscopy image experiments
    - `script/6_train_deepfluoro_real_manual*.sh`
    - `script/7_test_deepfluoro_real_manual.sh`
 
@@ -92,31 +72,13 @@ The main outputs are written under:
 - `results/`
 - `visualizations/`
 
-Patient-held-out test runs write CSV summaries under:
+Test runs write CSV summaries under:
 - `visualizations/patient_held_out/<run>/prediction_<...>/csv_results/`
 - `visualizations/patient_held_out/<run>/prediction_<...>/final_results/`
 
-## Analysis
-
-Main aggregation and figure utilities are in:
-- [analysis/](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/analysis)
-- [src/sweep/main.py](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/src/sweep/main.py)
-- [src/sweep/combine_patients.py](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/src/sweep/combine_patients.py)
-
-Promoted patient-held-out analysis scripts include:
-- `analysis/make_patient_held_out_figures.py`
-- `analysis/make_patient_held_out_finetune_figures.py`
-- `analysis/make_patient_held_out_finetune_grad_vs_nograd_figures.py`
-- `analysis/make_patient_held_out_tables.py`
-
-## More Detailed Docs
-
-- Main held-out pipeline: [src/train_patient_held_out/README.md](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/src/train_patient_held_out/README.md)
-- Optional real-image experiments: [src/train_deepfluoro_real/README.md](/home/yehyun/Landmark-based-2D-3D-Registration-Uncertainty/src/train_deepfluoro_real/README.md)
-
 ## Reference
 
-If you found this code useful, please cite:
+If you found this code useful, please cite this [paper](https://openreview.net/pdf?id=t40yShfMhk):
 
 ```bibtex
 @inproceedings{suh2026landmark,
