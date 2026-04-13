@@ -52,16 +52,17 @@ This prepares the extracted dataset and baseline DRRs.
 Use the canonical shell launchers in `script/`:
 
 1. Data preparation
+   - `wget --no-check-certificate -O data/ipcai_2020_full_res_data.zip "http://archive.data.jhu.edu/api/access/datafile/:persistentId/?persistentId=doi:10.7281/T1/IFSXNV/EAN9GH"`
    - `script/1_data.sh`
-2. Patient-held-out training
+3. Patient-held-out training
    - `script/2_train_patient_held_out.sh`
-3. MC-dropout testing and filtering sweeps
+4. MC-dropout testing and filtering sweeps
    - `script/3_test_patient_held_out_dropout.sh`
-4. Finetuning
+5. Finetuning
    - `script/4_finetune_patient_held_out.sh`
-5. Finetuned testing
+6. Finetuned testing
    - `script/5_test_finetune*.sh`
-6. Fluoroscopy image experiments
+7. Fluoroscopy image experiments
    - `script/6_train_deepfluoro_real_manual*.sh`
    - `script/7_test_deepfluoro_real_manual.sh`
 
